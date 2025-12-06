@@ -1,0 +1,46 @@
+# Bungalow – Linux Dev Toolkit 🐧
+
+**Author:** Eid Ali <eid.horus@gmail.com>  
+**Inspired by:** Classic Linux tools and the love for a clean terminal workflow  
+
+---
+
+## Description
+
+Bungalow is a **terminal-based GUI** that lets Linux users quickly install programming tools, compilers, interpreters, IDEs, web development stacks, debuggers, game engines, and graphics tools.  
+
+- Already installed tools are automatically detected and checked.  
+- Option to “Install everything” in a section.  
+- Works with multiple distributions (Debian, Ubuntu, Fedora, Arch, OpenSUSE, etc.) by automatically detecting your package manager.  
+- Clean, simple, and friendly for both new users and seasoned Linux developers.  
+
+> *May the Penguin be with you! 🐧*
+
+---
+
+## Screenshots
+
+**Splash Screen:**  
+
+![Splash Screen](screenshots/Screenshot_SplashScreen.png)  
+
+**Example Section – Web Development Stack:**  
+
+![Web Dev Section](screenshots/Screenshot_WebDev.png)  
+
+**Example Section – Graphics & Design:**  
+
+![Graphics Section](screenshots/Screenshot_Graphics.png)  
+
+**Example Section – Krita:**  
+
+![Krita Section](screenshots/Screenshot_Krita.png)  
+
+---
+
+## Installation
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/eidali/bungalow-dev-toolkit.git
+cd bungalow-dev-toolkit

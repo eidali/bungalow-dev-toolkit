@@ -1,0 +1,16 @@
+# Temporary files created by editors
+*.swp
+*.swo
+*.swn
+*~
+
+# Micro editor swap files
+*.bak
+
+# Python cache (if you ever add Python scripts)
+__pycache__/
+*.pyc
+
+# System files
+.DS_Store
+Thumbs.db
