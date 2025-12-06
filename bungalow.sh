@@ -1,27 +1,82 @@
 #!/bin/bash
-
 # ===============================
 # BUNGALOW – Linux Dev Toolkit
 # Author: Eid Ali <eid.horus@gmail.com>
 # ===============================
 
+set -uo pipefail  # Exit on undefined vars and pipe failures (but not on command errors)
+
 TMP=$(mktemp)
+trap 'rm -f "$TMP"' EXIT  # Cleanup on exit
+
+# ===============================
+# Detect package manager
+# ===============================
+detect_package_manager() {
+    if command -v apt &> /dev/null; then
+        echo "apt"
+    elif command -v dnf &> /dev/null; then
+        echo "dnf"
+    elif command -v yum &> /dev/null; then
+        echo "yum"
+    elif command -v pacman &> /dev/null; then
+        echo "pacman"
+    elif command -v zypper &> /dev/null; then
+        echo "zypper"
+    else
+        dialog --title "Error" --msgbox "Unsupported Linux distribution" 7 50
+        exit 1
+    fi
+}
+
+PKG_MANAGER=$(detect_package_manager)
 
 # ===============================
 # Check if dialog is installed
 # ===============================
-if ! command -v dialog &> /dev/null; then
-    echo "Dialog is not installed. Installing..."
-    if command -v apt &> /dev/null; then
-        sudo apt install -y dialog
-    elif command -v dnf &> /dev/null; then
-        sudo dnf install -y dialog
-    elif command -v pacman &> /dev/null; then
-        sudo pacman -S --noconfirm dialog
-    else
-        echo "Cannot install dialog. Unsupported distro."
+install_dialog() {
+    if ! command -v dialog &> /dev/null; then
+        echo "Dialog is not installed. Installing..."
+        case "$PKG_MANAGER" in
+            apt) sudo apt update && sudo apt install -y dialog ;;
+            dnf) sudo dnf install -y dialog ;;
+            yum) sudo yum install -y dialog ;;
+            pacman) sudo pacman -Sy --noconfirm dialog ;;
+            zypper) sudo zypper install -y dialog ;;
+            *) echo "Please install 'dialog' manually"; exit 1 ;;
+        esac
+        
+        if ! command -v dialog &> /dev/null; then
+            echo "Failed to install dialog"
+            exit 1
+        fi
+    fi
+}
+
+install_dialog
+
+# ===============================
+# Request sudo password upfront
+# ===============================
+# Check if we need sudo
+if [ "$EUID" -ne 0 ]; then
+    dialog --title "Authentication Required" --msgbox "This script requires sudo privileges to install packages.\nYou will be prompted for your password." 8 60
+    
+    # Prompt for password (this caches it for subsequent sudo commands)
+    sudo -v
+    
+    # Check if sudo was successful
+    if [ $? -ne 0 ]; then
+        dialog --title "Error" --msgbox "Authentication failed. Exiting." 7 40
         exit 1
     fi
+    
+    # Keep sudo session alive in background
+    while true; do
+        sudo -n true
+        sleep 50
+        kill -0 "$" 2>/dev/null || exit
+    done 2>/dev/null &
 fi
 
 # ===============================
@@ -34,238 +89,347 @@ For The Love Of Linux
 May the Penguin be with you! 🐧" 15 60
 
 # ===============================
-# Detect package manager
+# Package name mapping for cross-distro support
 # ===============================
-if command -v apt &> /dev/null; then
-    PKG_MANAGER="apt"
-elif command -v dnf &> /dev/null; then
-    PKG_MANAGER="dnf"
-elif command -v yum &> /dev/null; then
-    PKG_MANAGER="yum"
-elif command -v pacman &> /dev/null; then
-    PKG_MANAGER="pacman"
-elif command -v zypper &> /dev/null; then
-    PKG_MANAGER="zypper"
-else
-    echo "Unsupported Linux distribution"
-    exit 1
-fi
+get_package_name() {
+    local generic_name="$1"
+    
+    case "$PKG_MANAGER" in
+        apt)
+            case "$generic_name" in
+                nodejs) echo "nodejs npm" ;;
+                default-jdk) echo "default-jdk" ;;
+                python-flask) echo "python3-flask" ;;
+                python-django) echo "python3-django" ;;
+                composer) echo "composer" ;;
+                *) echo "$generic_name" ;;
+            esac
+            ;;
+        pacman)
+            case "$generic_name" in
+                golang) echo "go" ;;
+                default-jdk) echo "jdk-openjdk" ;;
+                python-flask) echo "python-flask" ;;
+                python-django) echo "python-django" ;;
+                composer) echo "composer" ;;
+                *) echo "$generic_name" ;;
+            esac
+            ;;
+        dnf|yum)
+            case "$generic_name" in
+                default-jdk) echo "java-latest-openjdk-devel" ;;
+                python-flask) echo "python3-flask" ;;
+                python-django) echo "python3-django" ;;
+                composer) echo "composer" ;;
+                *) echo "$generic_name" ;;
+            esac
+            ;;
+        *)
+            echo "$generic_name"
+            ;;
+    esac
+}
 
 # ===============================
 # Package installation function
 # ===============================
 install_pkg() {
-    PACKAGE=$1
-    case $PKG_MANAGER in
-        apt) sudo apt install -y $PACKAGE ;;
-        dnf) sudo dnf install -y $PACKAGE ;;
-        yum) sudo yum install -y $PACKAGE ;;
-        pacman) sudo pacman -S --noconfirm $PACKAGE ;;
-        zypper) sudo zypper install -y $PACKAGE ;;
+    local package="$1"
+    local actual_package
+    actual_package=$(get_package_name "$package")
+    local result=0
+    
+    case "$PKG_MANAGER" in
+        apt) 
+            sudo apt update &> /dev/null
+            sudo apt install -y $actual_package 2>&1 | dialog --programbox "Installing $package..." 20 70
+            result=${PIPESTATUS[0]}
+            ;;
+        dnf) 
+            sudo dnf install -y $actual_package 2>&1 | dialog --programbox "Installing $package..." 20 70
+            result=${PIPESTATUS[0]}
+            ;;
+        yum) 
+            sudo yum install -y $actual_package 2>&1 | dialog --programbox "Installing $package..." 20 70
+            result=${PIPESTATUS[0]}
+            ;;
+        pacman) 
+            sudo pacman -Sy --noconfirm $actual_package 2>&1 | dialog --programbox "Installing $package..." 20 70
+            result=${PIPESTATUS[0]}
+            ;;
+        zypper) 
+            sudo zypper install -y $actual_package 2>&1 | dialog --programbox "Installing $package..." 20 70
+            result=${PIPESTATUS[0]}
+            ;;
     esac
+    
+    if [ $result -eq 0 ]; then
+        dialog --title "Success" --msgbox "$package installed successfully!" 7 50
+    else
+        dialog --title "Error" --msgbox "Failed to install $package" 7 50
+    fi
 }
 
 # ===============================
 # Check if a package is installed
 # ===============================
 is_installed() {
-    PACKAGE=$1
-    case $PKG_MANAGER in
-        apt) dpkg -s $PACKAGE &> /dev/null ;;
-        dnf|yum) rpm -q $PACKAGE &> /dev/null ;;
-        pacman) pacman -Q $PACKAGE &> /dev/null ;;
-        zypper) rpm -q $PACKAGE &> /dev/null ;;
+    local package="$1"
+    local actual_package
+    actual_package=$(get_package_name "$package")
+    
+    case "$PKG_MANAGER" in
+        apt) dpkg -s $actual_package &> /dev/null ;;
+        dnf|yum) rpm -q $actual_package &> /dev/null ;;
+        pacman) pacman -Q $actual_package &> /dev/null ;;
+        zypper) rpm -q $actual_package &> /dev/null ;;
     esac
 }
 
 # ===============================
-# Sections
+# Section: Compilers & Interpreters
 # ===============================
 section_compilers() {
-    C_STATUS="off"; PYTHON_STATUS="off"; JAVA_STATUS="off"
-    is_installed gcc && C_STATUS="on"; is_installed g++ && C_STATUS="on"
-    is_installed python3 && PYTHON_STATUS="on"
-    is_installed default-jdk && JAVA_STATUS="on"
-
-    dialog --title "Compilers & Interpreters" --checklist "Select tools to install:" 20 60 10 \
-    1 "C / C++ (gcc / g++)" $C_STATUS \
-    2 "Python 3 + pip" $PYTHON_STATUS \
-    3 "Java (default JDK)" $JAVA_STATUS \
-    4 "Maven (Java build tool)" off \
-    5 "Gradle (optional)" off \
-    6 "C# (Mono)" off \
-    7 "Ruby" off \
-    8 "Install everything in this section" off 2> "$TMP"
-
-    [ $? -ne 0 ] && return 1
-    read -r -a ITEMS <<< "$(cat "$TMP")"
-    for i in "${ITEMS[@]}"; do
-        case $i in
-            1) install_pkg gcc; install_pkg g++ ;;
-            2) install_pkg python3; install_pkg python3-pip ;;
-            3) install_pkg default-jdk ;;
-            4) install_pkg maven ;;
-            5) install_pkg gradle ;;
-            6) install_pkg mono-complete ;;
-            7) install_pkg ruby ;;
-            8) install_pkg gcc; install_pkg g++; install_pkg python3; install_pkg python3-pip; install_pkg default-jdk; install_pkg maven; install_pkg gradle; install_pkg mono-complete; install_pkg ruby ;;
-        esac
+    dialog --title "Compilers & Interpreters" --checklist \
+    "Select packages to install (Space to select, Enter to confirm):" 20 70 10 \
+    "gcc" "GNU C Compiler" $(is_installed gcc && echo "on" || echo "off") \
+    "g++" "GNU C++ Compiler" $(is_installed g++ && echo "on" || echo "off") \
+    "python3" "Python Interpreter" $(is_installed python3 && echo "on" || echo "off") \
+    "rustc" "Rust Compiler" $(is_installed rustc && echo "on" || echo "off") \
+    "golang" "Go Programming Language" $(is_installed golang && echo "on" || echo "off") \
+    "clang" "LLVM C/C++ Compiler" $(is_installed clang && echo "on" || echo "off") \
+    "default-jdk" "Java Development Kit (OpenJDK)" $(is_installed default-jdk && echo "on" || echo "off") \
+    "ruby" "Ruby Interpreter" $(is_installed ruby && echo "on" || echo "off") \
+    "perl" "Perl Interpreter" $(is_installed perl && echo "on" || echo "off") \
+    2> "$TMP"
+    
+    # If user cancelled, just return to main menu
+    if [ $? -ne 0 ]; then
+        return
+    fi
+    
+    selections=$(cat "$TMP")
+    
+    # If nothing selected, return to main menu
+    if [ -z "$selections" ]; then
+        return
+    fi
+    
+    for pkg in $selections; do
+        pkg=$(echo "$pkg" | tr -d '"')
+        if ! is_installed "$pkg"; then
+            install_pkg "$pkg"
+        fi
     done
 }
 
+# ===============================
+# Section: Web Development Stack
+# ===============================
 section_webdev() {
-    NODE_STATUS="off"; PHP_STATUS="off"; DJANGO_STATUS="off"; APACHE_STATUS="off"; NGINX_STATUS="off"; MYSQL_STATUS="off"
-    is_installed nodejs && NODE_STATUS="on"
-    is_installed php && PHP_STATUS="on"
-    is_installed python3-django && DJANGO_STATUS="on"
-    is_installed httpd && APACHE_STATUS="on"
-    is_installed nginx && NGINX_STATUS="on"
-    is_installed mariadb-server && MYSQL_STATUS="on"
-
-    dialog --title "Web Development Stack" --checklist "Select tools to install:" 25 70 12 \
-    1 "Node.js + npm" $NODE_STATUS \
-    2 "PHP + CLI + FPM" $PHP_STATUS \
-    3 "Django (Python pip)" $DJANGO_STATUS \
-    4 "Apache HTTP Server" $APACHE_STATUS \
-    5 "Nginx" $NGINX_STATUS \
-    6 "MariaDB / MySQL" $MYSQL_STATUS \
-    7 "PostgreSQL" off \
-    8 "SQLite3" off \
-    9 "phpMyAdmin" off \
-    10 "Composer (PHP dependency manager)" off \
-    11 "Install everything in this section" off 2> "$TMP"
-
-    [ $? -ne 0 ] && return 1
-    read -r -a ITEMS <<< "$(cat "$TMP")"
-    for i in "${ITEMS[@]}"; do
-        case $i in
-            1) install_pkg nodejs; install_pkg npm ;;
-            2) install_pkg php; install_pkg php-cli; install_pkg php-fpm ;;
-            3) install_pkg python3-django ;;
-            4) install_pkg httpd ;;
-            5) install_pkg nginx ;;
-            6) install_pkg mariadb-server ;;
-            7) install_pkg postgresql ;;
-            8) install_pkg sqlite3 ;;
-            9) install_pkg phpmyadmin ;;
-            10) install_pkg composer ;;
-            11) install_pkg nodejs; install_pkg npm; install_pkg php; install_pkg php-cli; install_pkg php-fpm; install_pkg python3-django; install_pkg httpd; install_pkg nginx; install_pkg mariadb-server; install_pkg postgresql; install_pkg sqlite3; install_pkg phpmyadmin; install_pkg composer ;;
-        esac
-    done
+    dialog --title "Web Development Stack" --checklist \
+    "Select packages to install (Space to select, Enter to confirm):" 20 70 12 \
+    "nodejs" "Node.js JavaScript Runtime" $(is_installed nodejs && echo "on" || echo "off") \
+    "nginx" "High-performance Web Server" $(is_installed nginx && echo "on" || echo "off") \
+    "apache2" "Apache HTTP Server" $(is_installed apache2 && echo "on" || echo "off") \
+    "php" "PHP Scripting Language" $(is_installed php && echo "on" || echo "off") \
+    "composer" "PHP Dependency Manager" $(is_installed composer && echo "on" || echo "off") \
+    "python-flask" "Flask - Python Web Framework" $(is_installed python-flask && echo "on" || echo "off") \
+    "python-django" "Django - Python Web Framework" $(is_installed python-django && echo "on" || echo "off") \
+    "mysql-server" "MySQL Database Server" $(is_installed mysql-server && echo "on" || echo "off") \
+    "postgresql" "PostgreSQL Database" $(is_installed postgresql && echo "on" || echo "off") \
+    "redis-server" "Redis In-Memory Database" $(is_installed redis-server && echo "on" || echo "off") \
+    "mongodb" "MongoDB NoSQL Database" $(is_installed mongodb && echo "on" || echo "off") \
+    2> "$TMP"
+    
+    if [ $? -ne 0 ]; then
+        return
+    fi
+    
+    selections=$(cat "$TMP")
+    
+    if [ -z "$selections" ]; then
+        return
+    fi
+    
+    # Special handling for Symfony (requires Composer)
+    if echo "$selections" | grep -q "composer"; then
+        for pkg in $selections; do
+            pkg=$(echo "$pkg" | tr -d '"')
+            if ! is_installed "$pkg"; then
+                install_pkg "$pkg"
+            fi
+        done
+        
+        # Offer to install Symfony after Composer is installed
+        if is_installed "composer"; then
+            dialog --title "Symfony Framework" --yesno "Composer is installed. Would you like to install Symfony CLI?" 7 60
+            if [ $? -eq 0 ]; then
+                dialog --title "Symfony Installation" --msgbox "Run this command to install Symfony CLI:\n\ncurl -sS https://get.symfony.com/cli/installer | bash" 10 70
+            fi
+        fi
+    else
+        for pkg in $selections; do
+            pkg=$(echo "$pkg" | tr -d '"')
+            if ! is_installed "$pkg"; then
+                install_pkg "$pkg"
+            fi
+        done
+    fi
 }
 
+# ===============================
+# Section: IDEs & Editors
+# ===============================
 section_ides() {
-    VIM_STATUS="off"; MICRO_STATUS="off"; EMACS_STATUS="off"; ECLIPSE_STATUS="off"; NETBEANS_STATUS="off"
-
-    is_installed vim && VIM_STATUS="on"
-    is_installed micro && MICRO_STATUS="on"
-    is_installed emacs && EMACS_STATUS="on"
-    is_installed eclipse && ECLIPSE_STATUS="on"
-    is_installed netbeans && NETBEANS_STATUS="on"
-
-    dialog --title "IDEs & Editors" --checklist "Select tools to install:" 20 60 8 \
-    1 "Vim" $VIM_STATUS \
-    2 "Micro" $MICRO_STATUS \
-    3 "Emacs" $EMACS_STATUS \
-    4 "Eclipse" $ECLIPSE_STATUS \
-    5 "NetBeans" $NETBEANS_STATUS \
-    6 "VS Code (opens browser)" off \
-    7 "Install everything in this section" off 2> "$TMP"
-
-    [ $? -ne 0 ] && return 1
-    read -r -a ITEMS <<< "$(cat "$TMP")"
-    for i in "${ITEMS[@]}"; do
-        case $i in
-            1) install_pkg vim ;;
-            2) install_pkg micro ;;
-            3) install_pkg emacs ;;
-            4) install_pkg eclipse ;;
-            5) install_pkg netbeans ;;
-            6) command -v xdg-open &>/dev/null && xdg-open https://code.visualstudio.com/download ;;
-            7) install_pkg vim; install_pkg micro; install_pkg emacs; install_pkg eclipse; install_pkg netbeans ;;
-        esac
+    dialog --title "IDEs & Editors" --checklist \
+    "Select packages to install (Space to select, Enter to confirm):" 22 70 12 \
+    "vim" "Vi IMproved Text Editor" $(is_installed vim && echo "on" || echo "off") \
+    "emacs" "GNU Emacs Text Editor" $(is_installed emacs && echo "on" || echo "off") \
+    "nano" "Simple Terminal Text Editor" $(is_installed nano && echo "on" || echo "off") \
+    "micro" "Modern Terminal Text Editor" $(is_installed micro && echo "on" || echo "off") \
+    "gedit" "GNOME Text Editor" $(is_installed gedit && echo "on" || echo "off") \
+    "kate" "KDE Advanced Text Editor" $(is_installed kate && echo "on" || echo "off") \
+    "atom" "Atom Text Editor (GitHub)" $(is_installed atom && echo "on" || echo "off") \
+    "vscode" "Visual Studio Code (Microsoft)" off \
+    "sublime-text" "Sublime Text Editor" $(is_installed sublime-text && echo "on" || echo "off") \
+    "geany" "Lightweight IDE" $(is_installed geany && echo "on" || echo "off") \
+    2> "$TMP"
+    
+    if [ $? -ne 0 ]; then
+        return
+    fi
+    
+    selections=$(cat "$TMP")
+    
+    if [ -z "$selections" ]; then
+        return
+    fi
+    
+    for pkg in $selections; do
+        pkg=$(echo "$pkg" | tr -d '"')
+        
+        # Special handling for VS Code
+        if [ "$pkg" = "vscode" ]; then
+            dialog --title "Visual Studio Code" --msgbox "VS Code requires manual installation.\n\nOpening download page in your browser..." 9 60
+            
+            # Try to open browser (suppress output)
+            if command -v xdg-open &> /dev/null; then
+                xdg-open "https://code.visualstudio.com/download" &> /dev/null &
+            elif command -v firefox &> /dev/null; then
+                firefox "https://code.visualstudio.com/download" &> /dev/null &
+            elif command -v chromium &> /dev/null; then
+                chromium "https://code.visualstudio.com/download" &> /dev/null &
+            elif command -v google-chrome &> /dev/null; then
+                google-chrome "https://code.visualstudio.com/download" &> /dev/null &
+            else
+                dialog --title "VS Code" --msgbox "Could not open browser automatically.\n\nPlease visit:\nhttps://code.visualstudio.com/download" 10 60
+            fi
+            continue
+        fi
+        
+        # Install other packages normally
+        if ! is_installed "$pkg"; then
+            install_pkg "$pkg"
+        fi
     done
 }
 
+# ===============================
+# Section: Debuggers & Tools
+# ===============================
 section_debuggers() {
-    GDB_STATUS="off"; STRACE_STATUS="off"; LTRACE_STATUS="off"; VALGRIND_STATUS="off"; CMAKE_STATUS="off"; GIT_STATUS="off"; HTOP_STATUS="off"
-
-    is_installed gdb && GDB_STATUS="on"
-    is_installed strace && STRACE_STATUS="on"
-    is_installed ltrace && LTRACE_STATUS="on"
-    is_installed valgrind && VALGRIND_STATUS="on"
-    is_installed cmake && CMAKE_STATUS="on"
-    is_installed git && GIT_STATUS="on"
-    is_installed htop && HTOP_STATUS="on"
-
-    dialog --title "Debuggers & Tools" --checklist "Select tools to install:" 20 60 8 \
-    1 "GDB" $GDB_STATUS \
-    2 "strace" $STRACE_STATUS \
-    3 "ltrace" $LTRACE_STATUS \
-    4 "Valgrind" $VALGRIND_STATUS \
-    5 "CMake" $CMAKE_STATUS \
-    6 "Git" $GIT_STATUS \
-    7 "htop" $HTOP_STATUS \
-    8 "Install everything in this section" off 2> "$TMP"
-
-    [ $? -ne 0 ] && return 1
-    read -r -a ITEMS <<< "$(cat "$TMP")"
-    for i in "${ITEMS[@]}"; do
-        case $i in
-            1) install_pkg gdb ;;
-            2) install_pkg strace ;;
-            3) install_pkg ltrace ;;
-            4) install_pkg valgrind ;;
-            5) install_pkg cmake ;;
-            6) install_pkg git ;;
-            7) install_pkg htop ;;
-            8) install_pkg gdb; install_pkg strace; install_pkg ltrace; install_pkg valgrind; install_pkg cmake; install_pkg git; install_pkg htop ;;
-        esac
+    dialog --title "Debuggers & Development Tools" --checklist \
+    "Select packages to install (Space to select, Enter to confirm):" 20 70 10 \
+    "gdb" "GNU Debugger" $(is_installed gdb && echo "on" || echo "off") \
+    "valgrind" "Memory Debugger & Profiler" $(is_installed valgrind && echo "on" || echo "off") \
+    "strace" "System Call Tracer" $(is_installed strace && echo "on" || echo "off") \
+    "ltrace" "Library Call Tracer" $(is_installed ltrace && echo "on" || echo "off") \
+    "git" "Version Control System" $(is_installed git && echo "on" || echo "off") \
+    "make" "Build Automation Tool" $(is_installed make && echo "on" || echo "off") \
+    "cmake" "Cross-platform Build System" $(is_installed cmake && echo "on" || echo "off") \
+    "docker.io" "Container Platform" $(is_installed docker.io && echo "on" || echo "off") \
+    2> "$TMP"
+    
+    if [ $? -ne 0 ]; then
+        return
+    fi
+    
+    selections=$(cat "$TMP")
+    
+    if [ -z "$selections" ]; then
+        return
+    fi
+    
+    for pkg in $selections; do
+        pkg=$(echo "$pkg" | tr -d '"')
+        if ! is_installed "$pkg"; then
+            install_pkg "$pkg"
+        fi
     done
 }
 
+# ===============================
+# Section: Game Engines
+# ===============================
 section_gameengines() {
-    GODOT_STATUS="off"
-    is_installed godot && GODOT_STATUS="on"
-
-    dialog --title "Game Engines" --checklist "Select tools to install:" 10 50 3 \
-    1 "Godot" $GODOT_STATUS \
-    2 "Install everything in this section" $GODOT_STATUS 2> "$TMP"
-
-    [ $? -ne 0 ] && return 1
-    read -r -a ITEMS <<< "$(cat "$TMP")"
-    for i in "${ITEMS[@]}"; do
-        case $i in
-            1|2) install_pkg godot ;;
-        esac
+    dialog --title "Game Development" --checklist \
+    "Select packages to install (Space to select, Enter to confirm):" 20 70 10 \
+    "godot" "Godot Game Engine" $(is_installed godot && echo "on" || echo "off") \
+    "libsdl2-dev" "SDL2 Development Library" $(is_installed libsdl2-dev && echo "on" || echo "off") \
+    "libsfml-dev" "SFML Game Library" $(is_installed libsfml-dev && echo "on" || echo "off") \
+    2> "$TMP"
+    
+    if [ $? -ne 0 ]; then
+        return
+    fi
+    
+    selections=$(cat "$TMP")
+    
+    if [ -z "$selections" ]; then
+        dialog --title "Note" --msgbox "Unity and Unreal Engine require manual installation from their websites." 8 60
+        return
+    fi
+    
+    for pkg in $selections; do
+        pkg=$(echo "$pkg" | tr -d '"')
+        if ! is_installed "$pkg"; then
+            install_pkg "$pkg"
+        fi
     done
 }
 
+# ===============================
+# Section: Graphics & Design
+# ===============================
 section_graphics() {
-    BLENDER_STATUS="off"; GIMP_STATUS="off"; INKSCAPE_STATUS="off"; KRITA_STATUS="off"
-
-    is_installed blender && BLENDER_STATUS="on"
-    is_installed gimp && GIMP_STATUS="on"
-    is_installed inkscape && INKSCAPE_STATUS="on"
-    is_installed krita && KRITA_STATUS="on"
-
-    dialog --title "Graphics & Design Tools" --checklist "Select tools to install:" 15 60 6 \
-    1 "Blender 3D" $BLENDER_STATUS \
-    2 "GIMP (Photoshop Alternative)" $GIMP_STATUS \
-    3 "Inkscape (Illustrator Alternative)" $INKSCAPE_STATUS \
-    4 "Krita (Photoshop Alternative)" $KRITA_STATUS \
-    5 "Install everything in this section" off 2> "$TMP"
-
-    [ $? -ne 0 ] && return 1
-    read -r -a ITEMS <<< "$(cat "$TMP")"
-    for i in "${ITEMS[@]}"; do
-        case $i in
-            1) install_pkg blender ;;
-            2) install_pkg gimp ;;
-            3) install_pkg inkscape ;;
-            4) install_pkg krita ;;
-            5) install_pkg blender; install_pkg gimp; install_pkg inkscape; install_pkg krita ;;
-        esac
+    dialog --title "Graphics & Design Tools" --checklist \
+    "Select packages to install (Space to select, Enter to confirm):" 20 70 10 \
+    "gimp" "Image Editor (Photoshop Alternative)" $(is_installed gimp && echo "on" || echo "off") \
+    "inkscape" "Vector Graphics (Illustrator Alternative)" $(is_installed inkscape && echo "on" || echo "off") \
+    "blender" "3D Modeling & Animation" $(is_installed blender && echo "on" || echo "off") \
+    "krita" "Digital Painting (Photoshop Alternative)" $(is_installed krita && echo "on" || echo "off") \
+    "darktable" "Photo Editor (Lightroom Alternative)" $(is_installed darktable && echo "on" || echo "off") \
+    "kdenlive" "Video Editor (Premiere Alternative)" $(is_installed kdenlive && echo "on" || echo "off") \
+    "audacity" "Audio Editor (Audition Alternative)" $(is_installed audacity && echo "on" || echo "off") \
+    "openscad" "3D CAD Modeler" $(is_installed openscad && echo "on" || echo "off") \
+    2> "$TMP"
+    
+    if [ $? -ne 0 ]; then
+        return
+    fi
+    
+    selections=$(cat "$TMP")
+    
+    if [ -z "$selections" ]; then
+        return
+    fi
+    
+    for pkg in $selections; do
+        pkg=$(echo "$pkg" | tr -d '"')
+        if ! is_installed "$pkg"; then
+            install_pkg "$pkg"
+        fi
     done
 }
 
@@ -281,11 +445,15 @@ while true; do
     5 "Game Engines" \
     6 "Graphics & Design" \
     7 "Exit" 2> "$TMP"
-
-    [ $? -ne 0 ] && break
-
+    
+    # Check if user cancelled (ESC)
+    if [ $? -ne 0 ]; then
+        break
+    fi
+    
     CHOICE=$(cat "$TMP")
-    case $CHOICE in
+    
+    case "$CHOICE" in
         1) section_compilers ;;
         2) section_webdev ;;
         3) section_ides ;;
@@ -293,14 +461,14 @@ while true; do
         5) section_gameengines ;;
         6) section_graphics ;;
         7) break ;;
+        *) continue ;;
     esac
 done
 
 # ===============================
-# Clear screen at exit
+# Exit cleanup
 # ===============================
-dialog --title "Finished" --yesno "Do you want to clear the terminal screen after exiting?" 7 50
+dialog --title "Finished" --yesno "Do you want to clear the terminal screen?" 7 50
 [ $? -eq 0 ] && clear
 
-rm "$TMP"
 echo "May the Penguin be with you! 🐧"
