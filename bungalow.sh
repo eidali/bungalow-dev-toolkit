@@ -8,15 +8,6 @@
 TMP=$(mktemp)
 
 # ===============================
-# Splash Screen
-# ===============================
-dialog --title "🏠 Bungalow – Linux Dev Toolkit" --msgbox "\
-Welcome to Bungalow!
-Author: Eid Ali <eid.horus@gmail.com>
-For The Love Of Linux
-May the Penguin be with you! 🐧" 15 60
-
-# ===============================
 # Check if dialog is installed
 # ===============================
 if ! command -v dialog &> /dev/null; then
@@ -32,6 +23,15 @@ if ! command -v dialog &> /dev/null; then
         exit 1
     fi
 fi
+
+# ===============================
+# Splash Screen
+# ===============================
+dialog --title "🏠 Bungalow – Linux Dev Toolkit" --msgbox "\
+Welcome to Bungalow!
+Author: Eid Ali <eid.horus@gmail.com>
+For The Love Of Linux
+May the Penguin be with you! 🐧" 15 60
 
 # ===============================
 # Detect package manager
@@ -79,7 +79,7 @@ is_installed() {
 }
 
 # ===============================
-# Section: Compilers & Interpreters
+# Sections
 # ===============================
 section_compilers() {
     C_STATUS="off"; PYTHON_STATUS="off"; JAVA_STATUS="off"
@@ -113,9 +113,6 @@ section_compilers() {
     done
 }
 
-# ===============================
-# Section: Web Development Stack
-# ===============================
 section_webdev() {
     NODE_STATUS="off"; PHP_STATUS="off"; DJANGO_STATUS="off"; APACHE_STATUS="off"; NGINX_STATUS="off"; MYSQL_STATUS="off"
     is_installed nodejs && NODE_STATUS="on"
@@ -157,9 +154,6 @@ section_webdev() {
     done
 }
 
-# ===============================
-# Section: IDEs & Editors
-# ===============================
 section_ides() {
     VIM_STATUS="off"; MICRO_STATUS="off"; EMACS_STATUS="off"; ECLIPSE_STATUS="off"; NETBEANS_STATUS="off"
 
@@ -193,9 +187,6 @@ section_ides() {
     done
 }
 
-# ===============================
-# Section: Debuggers & Tools
-# ===============================
 section_debuggers() {
     GDB_STATUS="off"; STRACE_STATUS="off"; LTRACE_STATUS="off"; VALGRIND_STATUS="off"; CMAKE_STATUS="off"; GIT_STATUS="off"; HTOP_STATUS="off"
 
@@ -233,9 +224,6 @@ section_debuggers() {
     done
 }
 
-# ===============================
-# Section: Game Engines
-# ===============================
 section_gameengines() {
     GODOT_STATUS="off"
     is_installed godot && GODOT_STATUS="on"
@@ -253,9 +241,6 @@ section_gameengines() {
     done
 }
 
-# ===============================
-# Section: Graphics & Design
-# ===============================
 section_graphics() {
     BLENDER_STATUS="off"; GIMP_STATUS="off"; INKSCAPE_STATUS="off"; KRITA_STATUS="off"
 
